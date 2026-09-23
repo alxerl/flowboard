@@ -2,6 +2,23 @@
 
 Flowboard is a Go and PostgreSQL delivery tracker for small software projects. It combines a team task board with GitHub issues and pull request events: issues become tasks, opening a linked PR moves a task into review, and merging it marks the task done. The dashboard shows delivery status, two-week throughput, average cycle time, and work stalled in review or progress.
 
+## How it works
+
+```mermaid
+flowchart LR
+  GH[GitHub issues and PRs] -->|signed webhook| WH[Go webhook handler]
+  WH -->|verify signature and delivery ID| DB[(PostgreSQL)]
+  DB --> API[Go API]
+  API --> UI[Team dashboard]
+```
+
+- **Repository sync:** signed issue events create or update tasks. Pull requests containing a task reference such as `ATL-2` move that task to review or done.
+- **Idempotent events:** GitHub delivery IDs are stored in PostgreSQL, so retries do not create duplicate tasks or activity entries.
+- **Team access:** accounts use password hashes and server-side sessions. Project owners add registered teammates; other projects stay private.
+- **Delivery insights:** the dashboard plots completed tasks by day and highlights work that has spent over two days in review or five days in progress.
+
+The product is currently a functional local demo. A hosted instance and email invitations are planned next.
+
 ## Run locally
 
 ```sh
