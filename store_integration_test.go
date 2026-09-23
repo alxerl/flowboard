@@ -98,4 +98,21 @@ func TestDeliveryFlow(t *testing.T) {
 	if err != nil || len(events) != 2 {
 		t.Fatalf("events: %v, %v", events, err)
 	}
+	if _, err := pool.Exec(ctx, `DROP TABLE IF EXISTS webhook_deliveries,task_events,tasks,projects,legacy_tasks,project_members,sessions,users CASCADE`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedDemo(ctx); err != nil {
+		t.Fatal(err)
+	}
+	demo, err := s.UserByEmail(ctx, "demo@flowboard.local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	demoProjects, err := s.ProjectsForUser(ctx, demo.ID)
+	if err != nil || len(demoProjects) != 1 || demoProjects[0].Key != "ATL" {
+		t.Fatalf("demo workspace: %v, %v", demoProjects, err)
+	}
 }
