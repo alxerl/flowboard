@@ -14,6 +14,7 @@ import (
 type App struct {
 	store         *Store
 	webhookSecret string
+	demoMode      bool
 }
 
 func (a *App) Routes() *http.ServeMux {
@@ -21,15 +22,25 @@ func (a *App) Routes() *http.ServeMux {
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
-	mux.HandleFunc("GET /api/projects", a.listProjects)
-	mux.HandleFunc("POST /api/projects", a.createProject)
-	mux.HandleFunc("GET /api/projects/{id}/tasks", a.listTasks)
-	mux.HandleFunc("POST /api/projects/{id}/tasks", a.createTask)
-	mux.HandleFunc("GET /api/projects/{id}/metrics", a.metrics)
-	mux.HandleFunc("GET /api/tasks/{id}", a.getTask)
-	mux.HandleFunc("PATCH /api/tasks/{id}", a.updateTask)
-	mux.HandleFunc("DELETE /api/tasks/{id}", a.deleteTask)
-	mux.HandleFunc("GET /api/tasks/{id}/events", a.events)
+	mux.HandleFunc("GET /api/config", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, 200, map[string]bool{"demo_mode": a.demoMode})
+	})
+	mux.HandleFunc("POST /api/auth/register", a.register)
+	mux.HandleFunc("POST /api/auth/login", a.login)
+	mux.HandleFunc("POST /api/auth/demo", a.demoLogin)
+	mux.HandleFunc("POST /api/auth/logout", a.logout)
+	mux.HandleFunc("GET /api/auth/me", a.withAuth(a.me))
+	mux.HandleFunc("GET /api/projects", a.withAuth(a.listProjects))
+	mux.HandleFunc("POST /api/projects", a.withAuth(a.createProject))
+	mux.HandleFunc("GET /api/projects/{id}/tasks", a.withAuth(a.listTasks))
+	mux.HandleFunc("POST /api/projects/{id}/tasks", a.withAuth(a.createTask))
+	mux.HandleFunc("GET /api/projects/{id}/metrics", a.withAuth(a.metrics))
+	mux.HandleFunc("GET /api/projects/{id}/members", a.withAuth(a.listMembers))
+	mux.HandleFunc("POST /api/projects/{id}/members", a.withAuth(a.addMember))
+	mux.HandleFunc("GET /api/tasks/{id}", a.withAuth(a.getTask))
+	mux.HandleFunc("PATCH /api/tasks/{id}", a.withAuth(a.updateTask))
+	mux.HandleFunc("DELETE /api/tasks/{id}", a.withAuth(a.deleteTask))
+	mux.HandleFunc("GET /api/tasks/{id}/events", a.withAuth(a.events))
 	mux.HandleFunc("POST /webhooks/github", a.githubWebhook)
 	return mux
 }
@@ -77,7 +88,7 @@ func decodeJSON(r *http.Request, v any) error {
 func pathID(r *http.Request) (int64, error) { return strconv.ParseInt(r.PathValue("id"), 10, 64) }
 
 func (a *App) listProjects(w http.ResponseWriter, r *http.Request) {
-	projects, err := a.store.Projects(r.Context())
+	projects, err := a.store.ProjectsForUser(r.Context(), currentUser(r).ID)
 	if err != nil {
 		dbError(w, err)
 		return
@@ -98,7 +109,7 @@ func (a *App) createProject(w http.ResponseWriter, r *http.Request) {
 		apiError(w, 400, "name, key or repository is invalid")
 		return
 	}
-	if err := a.store.CreateProject(r.Context(), &p); err != nil {
+	if err := a.store.CreateProjectForUser(r.Context(), &p, currentUser(r).ID); err != nil {
 		dbError(w, err)
 		return
 	}
@@ -128,6 +139,9 @@ func (a *App) listTasks(w http.ResponseWriter, r *http.Request) {
 		apiError(w, 400, "invalid project id")
 		return
 	}
+	if _, ok := a.projectRole(w, r, id); !ok {
+		return
+	}
 	tasks, err := a.store.Tasks(r.Context(), id)
 	if err != nil {
 		dbError(w, err)
@@ -140,6 +154,9 @@ func (a *App) createTask(w http.ResponseWriter, r *http.Request) {
 	id, err := pathID(r)
 	if err != nil || id < 1 {
 		apiError(w, 400, "invalid project id")
+		return
+	}
+	if _, ok := a.projectRole(w, r, id); !ok {
 		return
 	}
 	var t Task
@@ -173,9 +190,8 @@ func (a *App) getTask(w http.ResponseWriter, r *http.Request) {
 		apiError(w, 400, "invalid task id")
 		return
 	}
-	t, err := a.store.Task(r.Context(), id)
-	if err != nil {
-		dbError(w, err)
+	t, ok := a.taskAccess(w, r, id)
+	if !ok {
 		return
 	}
 	writeJSON(w, http.StatusOK, t)
@@ -200,9 +216,8 @@ func (a *App) updateTask(w http.ResponseWriter, r *http.Request) {
 		apiError(w, 400, "invalid JSON")
 		return
 	}
-	t, err := a.store.Task(r.Context(), id)
-	if err != nil {
-		dbError(w, err)
+	t, ok := a.taskAccess(w, r, id)
+	if !ok {
 		return
 	}
 	oldStatus := t.Status
@@ -241,6 +256,9 @@ func (a *App) deleteTask(w http.ResponseWriter, r *http.Request) {
 		apiError(w, 400, "invalid task id")
 		return
 	}
+	if _, ok := a.taskAccess(w, r, id); !ok {
+		return
+	}
 	if err := a.store.DeleteTask(r.Context(), id); err != nil {
 		dbError(w, err)
 		return
@@ -252,6 +270,9 @@ func (a *App) events(w http.ResponseWriter, r *http.Request) {
 	id, err := pathID(r)
 	if err != nil || id < 1 {
 		apiError(w, 400, "invalid task id")
+		return
+	}
+	if _, ok := a.taskAccess(w, r, id); !ok {
 		return
 	}
 	events, err := a.store.Events(r.Context(), id)
@@ -268,10 +289,64 @@ func (a *App) metrics(w http.ResponseWriter, r *http.Request) {
 		apiError(w, 400, "invalid project id")
 		return
 	}
+	if _, ok := a.projectRole(w, r, id); !ok {
+		return
+	}
 	m, err := a.store.Metrics(r.Context(), id)
 	if err != nil {
 		dbError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, m)
+}
+
+func (a *App) listMembers(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r)
+	if err != nil || id < 1 {
+		apiError(w, 400, "invalid project id")
+		return
+	}
+	if _, ok := a.projectRole(w, r, id); !ok {
+		return
+	}
+	members, err := a.store.Members(r.Context(), id)
+	if err != nil {
+		dbError(w, err)
+		return
+	}
+	writeJSON(w, 200, members)
+}
+
+func (a *App) addMember(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r)
+	if err != nil || id < 1 {
+		apiError(w, 400, "invalid project id")
+		return
+	}
+	role, ok := a.projectRole(w, r, id)
+	if !ok {
+		return
+	}
+	if role != "owner" {
+		apiError(w, 403, "only project owners can add members")
+		return
+	}
+	var input struct {
+		Email string `json:"email"`
+		Role  string `json:"role"`
+	}
+	if err := decodeJSON(r, &input); err != nil {
+		apiError(w, 400, "invalid JSON")
+		return
+	}
+	input.Email = strings.ToLower(strings.TrimSpace(input.Email))
+	if input.Role != "member" && input.Role != "owner" {
+		apiError(w, 400, "invalid role")
+		return
+	}
+	if err := a.store.AddMember(r.Context(), id, input.Email, input.Role); err != nil {
+		dbError(w, err)
+		return
+	}
+	w.WriteHeader(204)
 }

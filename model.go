@@ -10,6 +10,17 @@ type Project struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+type User struct {
+	ID          int64  `json:"id"`
+	Email       string `json:"email"`
+	DisplayName string `json:"display_name"`
+}
+
+type Member struct {
+	User
+	Role string `json:"role"`
+}
+
 type Task struct {
 	ID          int64     `json:"id"`
 	ProjectID   int64     `json:"project_id"`

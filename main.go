@@ -48,7 +48,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	app := &App{store: store, webhookSecret: os.Getenv("GITHUB_WEBHOOK_SECRET")}
+	app := &App{store: store, webhookSecret: os.Getenv("GITHUB_WEBHOOK_SECRET"), demoMode: os.Getenv("DEMO_MODE") == "1"}
 	mux := app.Routes()
 	mux.Handle("GET /", http.FileServer(http.FS(assets)))
 	port := os.Getenv("PORT")

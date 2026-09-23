@@ -20,7 +20,7 @@ func TestDeliveryFlow(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	if _, err := pool.Exec(ctx, `DROP TABLE IF EXISTS webhook_deliveries,task_events,tasks,projects,legacy_tasks CASCADE`); err != nil {
+	if _, err := pool.Exec(ctx, `DROP TABLE IF EXISTS webhook_deliveries,task_events,tasks,projects,legacy_tasks,project_members,sessions,users CASCADE`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `CREATE TABLE tasks(id SERIAL PRIMARY KEY,name TEXT,status TEXT); INSERT INTO tasks(name,status) VALUES('Old task','done')`); err != nil {
@@ -34,9 +34,39 @@ func TestDeliveryFlow(t *testing.T) {
 	if err != nil || len(projects) != 1 || projects[0].Key != "LEGACY" {
 		t.Fatalf("legacy migration: %v, %v", projects, err)
 	}
-	p := Project{Name: "Release", Key: "REL", Repo: "example/flowboard"}
-	if err := s.CreateProject(ctx, &p); err != nil {
+	owner, err := s.RegisterUser(ctx, "owner@example.com", "Project owner", "strong-password-123")
+	if err != nil {
 		t.Fatal(err)
+	}
+	if _, err := s.AuthenticateUser(ctx, owner.Email, "strong-password-123"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AuthenticateUser(ctx, owner.Email, "wrong-password"); err != ErrNotFound {
+		t.Fatalf("wrong password accepted: %v", err)
+	}
+	p := Project{Name: "Release", Key: "REL", Repo: "example/flowboard"}
+	if err := s.CreateProjectForUser(ctx, &p, owner.ID); err != nil {
+		t.Fatal(err)
+	}
+	member, err := s.RegisterUser(ctx, "member@example.com", "Team member", "another-password-123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.MemberRole(ctx, p.ID, member.ID); err != ErrNotFound {
+		t.Fatalf("unexpected access before invitation: %v", err)
+	}
+	if err := s.AddMember(ctx, p.ID, member.Email, "member"); err != nil {
+		t.Fatal(err)
+	}
+	if role, err := s.MemberRole(ctx, p.ID, member.ID); err != nil || role != "member" {
+		t.Fatalf("member role: %s, %v", role, err)
+	}
+	token, err := s.NewSession(ctx, member.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sessionUser, err := s.SessionUser(ctx, token); err != nil || sessionUser.ID != member.ID {
+		t.Fatalf("session: %+v, %v", sessionUser, err)
 	}
 	task := Task{ProjectID: p.ID, Title: "Ship integration", Status: "in_progress", Priority: "high"}
 	if err := s.CreateTask(ctx, &task); err != nil {

@@ -8,7 +8,7 @@ Flowboard is a Go and PostgreSQL delivery tracker for small software projects. I
 docker compose up --build
 ```
 
-Open <http://localhost:8080>. The demo workspace is created on the first start. Set `DEMO_MODE=0` to start with an empty database. The local Compose stack uses development database credentials; configure your own `DATABASE_URL` for other environments.
+Open <http://localhost:8080> and choose **Explore demo workspace**. The demo workspace is created on the first start. Set `DEMO_MODE=0` to disable demo access and start with an empty database. The local Compose stack uses development database credentials; configure your own `DATABASE_URL` for other environments.
 
 To run Go directly, start PostgreSQL and set `DATABASE_URL` as shown in `.env.example`, then run `go run .`.
 
@@ -25,7 +25,9 @@ Only signed `pull_request` events are accepted. Duplicate GitHub delivery IDs ar
 
 | Method | Path | Purpose |
 |---|---|---|
+| POST | `/api/auth/register`, `/api/auth/login`, `/api/auth/logout` | Accounts and sessions |
 | GET / POST | `/api/projects` | List or create projects |
+| GET / POST | `/api/projects/{id}/members` | List members or add an existing user (owner only) |
 | GET / POST | `/api/projects/{id}/tasks` | List or create tasks |
 | GET / PATCH / DELETE | `/api/tasks/{id}` | Read, update or delete a task |
 | GET | `/api/tasks/{id}/events` | Task activity history |
@@ -40,11 +42,11 @@ curl -X POST http://localhost:8080/api/projects/1/tasks \
   -d '{"title":"Ship release dashboard","priority":"high","assignee":"Alex"}'
 ```
 
-The current version is a demo workspace without user accounts. Add authentication and project permissions before hosting it as a shared production service.
+The API uses an HTTP-only session cookie. A new project is owned by its creator. Owners can add registered users as members or owners; only project members can access its tasks, events, and metrics. `DEMO_MODE=1` enables a shared demo account, so use `DEMO_MODE=0` for private workspaces.
 
 ## Next milestones
 
-- Multi-user workspaces with invitations and role-based permissions.
+- Email invitations and self-service acceptance for project membership.
 - GitHub issue linking and webhook-driven automation rules.
 - Activity charts, filters and bottleneck reports.
 - Hosted demo and a short walkthrough video.

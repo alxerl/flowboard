@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -23,6 +25,24 @@ CREATE TABLE IF NOT EXISTS projects (
  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE UNIQUE INDEX IF NOT EXISTS projects_repo_idx ON projects(lower(repo)) WHERE repo<>'';
+CREATE TABLE IF NOT EXISTS users (
+ id BIGSERIAL PRIMARY KEY,
+ email TEXT NOT NULL UNIQUE,
+ display_name TEXT NOT NULL,
+ password_hash TEXT NOT NULL,
+ created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS project_members (
+ project_id BIGINT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+ user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ role TEXT NOT NULL CHECK (role IN ('owner','member')),
+ PRIMARY KEY(project_id,user_id)
+);
+CREATE TABLE IF NOT EXISTS sessions (
+ token_hash TEXT PRIMARY KEY,
+ user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ expires_at TIMESTAMPTZ NOT NULL
+);
 CREATE TABLE IF NOT EXISTS tasks (
  id BIGSERIAL PRIMARY KEY,
  project_id BIGINT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -99,6 +119,75 @@ func (s *Store) Projects(ctx context.Context) ([]Project, error) {
 		projects = append(projects, p)
 	}
 	return projects, rows.Err()
+}
+
+func (s *Store) ProjectsForUser(ctx context.Context, userID int64) ([]Project, error) {
+	rows, err := s.db.Query(ctx, `SELECT p.id,p.name,p.key,p.repo,p.created_at FROM projects p JOIN project_members m ON m.project_id=p.id WHERE m.user_id=$1 ORDER BY p.id`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	projects := []Project{}
+	for rows.Next() {
+		var p Project
+		if err := rows.Scan(&p.ID, &p.Name, &p.Key, &p.Repo, &p.CreatedAt); err != nil {
+			return nil, err
+		}
+		projects = append(projects, p)
+	}
+	return projects, rows.Err()
+}
+
+func (s *Store) CreateProjectForUser(ctx context.Context, p *Project, userID int64) error {
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if err := tx.QueryRow(ctx, `INSERT INTO projects(name,key,repo) VALUES($1,$2,$3) RETURNING id,created_at`, p.Name, p.Key, p.Repo).Scan(&p.ID, &p.CreatedAt); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO project_members(project_id,user_id,role) VALUES($1,$2,'owner')`, p.ID, userID); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (s *Store) MemberRole(ctx context.Context, projectID, userID int64) (string, error) {
+	var role string
+	err := s.db.QueryRow(ctx, `SELECT role FROM project_members WHERE project_id=$1 AND user_id=$2`, projectID, userID).Scan(&role)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return role, err
+}
+
+func (s *Store) AddMember(ctx context.Context, projectID int64, email, role string) error {
+	cmd, err := s.db.Exec(ctx, `INSERT INTO project_members(project_id,user_id,role) SELECT $1,id,$3 FROM users WHERE email=$2 ON CONFLICT(project_id,user_id) DO UPDATE SET role=EXCLUDED.role`, projectID, email, role)
+	if err != nil {
+		return err
+	}
+	if cmd.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) Members(ctx context.Context, projectID int64) ([]Member, error) {
+	rows, err := s.db.Query(ctx, `SELECT u.id,u.email,u.display_name,m.role FROM users u JOIN project_members m ON m.user_id=u.id WHERE m.project_id=$1 ORDER BY m.role DESC,u.display_name`, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	members := []Member{}
+	for rows.Next() {
+		var m Member
+		if err := rows.Scan(&m.ID, &m.Email, &m.DisplayName, &m.Role); err != nil {
+			return nil, err
+		}
+		members = append(members, m)
+	}
+	return members, rows.Err()
 }
 
 func (s *Store) CreateProject(ctx context.Context, p *Project) error {
@@ -247,6 +336,17 @@ func (s *Store) ApplyPullRequest(ctx context.Context, delivery, repo string, num
 }
 
 func (s *Store) SeedDemo(ctx context.Context) error {
+	u, err := s.UserByEmail(ctx, "demo@flowboard.local")
+	if errors.Is(err, ErrNotFound) {
+		password := make([]byte, 32)
+		if _, err = rand.Read(password); err != nil {
+			return err
+		}
+		u, err = s.RegisterUser(ctx, "demo@flowboard.local", "Demo workspace", hex.EncodeToString(password))
+	}
+	if err != nil {
+		return err
+	}
 	var count int
 	if err := s.db.QueryRow(ctx, `SELECT count(*) FROM projects`).Scan(&count); err != nil {
 		return err
@@ -256,6 +356,9 @@ func (s *Store) SeedDemo(ctx context.Context) error {
 	}
 	p := Project{Name: "Atlas release", Key: "ATL", Repo: "alxerl/pet"}
 	if err := s.CreateProject(ctx, &p); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(ctx, `INSERT INTO project_members(project_id,user_id,role) VALUES($1,$2,'owner')`, p.ID, u.ID); err != nil {
 		return err
 	}
 	items := []Task{
