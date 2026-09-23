@@ -1,4 +1,4 @@
-module github.com/alxerl/pet
+module github.com/alxerl/flowboard
 
 go 1.25.2
 

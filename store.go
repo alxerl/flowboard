@@ -463,7 +463,7 @@ func (s *Store) SeedDemo(ctx context.Context) error {
 	if count > 0 {
 		return nil
 	}
-	p := Project{Name: "Atlas release", Key: "ATL", Repo: "alxerl/pet"}
+	p := Project{Name: "Atlas release", Key: "ATL", Repo: "alxerl/flowboard"}
 	if err := s.CreateProject(ctx, &p); err != nil {
 		return err
 	}
