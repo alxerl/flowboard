@@ -46,6 +46,15 @@ jobs:
           grep -q '"key":"ATL"' projects.json
           curl --fail --silent --show-error -b cookies.txt -o insights.json http://localhost:8080/api/projects/1/insights
           grep -q '"daily"' insights.json
+      - name: Capture the running board
+        run: |
+          npm install --no-save playwright
+          npx playwright install chromium --with-deps
+          node .github/scripts/capture-demo.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flowboard-screenshot
+          path: demo-screenshot.png
       - name: Show logs on failure
         if: failure()
         run: docker compose logs
