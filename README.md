@@ -17,7 +17,7 @@ flowchart LR
 - **Team access:** accounts use password hashes and server-side sessions. Project owners add registered teammates; other projects stay private.
 - **Delivery insights:** the dashboard plots completed tasks by day and highlights work that has spent over two days in review or five days in progress.
 
-The product is currently a functional local demo. A hosted instance and email invitations are planned next.
+The repository includes a one-command local demo and a CI smoke test that starts the full Docker Compose stack from a clean checkout.
 
 ## Run locally
 
@@ -25,7 +25,9 @@ The product is currently a functional local demo. A hosted instance and email in
 docker compose up --build
 ```
 
-Open <http://localhost:8080> and choose **Explore demo workspace**. The demo workspace is created on the first start. Set `DEMO_MODE=0` to disable demo access and start with an empty database. The local Compose stack uses development database credentials; configure your own `DATABASE_URL` for other environments.
+Open <http://localhost:8080> and choose **Explore demo workspace**. The demo workspace is created on the first start. The local Compose stack uses development database credentials. To start without demo access, set `DEMO_MODE=0` before running Compose.
+
+To stop the stack, press Ctrl+C. Run `docker compose down` to stop containers started in the background. Run `docker compose down -v` only when you also want to delete the local demo database.
 
 To run Go directly, start PostgreSQL and set `DATABASE_URL` as shown in `.env.example`, then run `go run .`.
 
@@ -52,10 +54,11 @@ Only signed `issues` and `pull_request` events are processed. Duplicate GitHub d
 | GET | `/api/projects/{id}/insights` | Two-week throughput and stalled tasks |
 | POST | `/webhooks/github` | Receive signed GitHub issue and PR events |
 
-Example:
+Example using the local demo account:
 
 ```sh
-curl -X POST http://localhost:8080/api/projects/1/tasks \
+curl -c cookies.txt -X POST http://localhost:8080/api/auth/demo
+curl -b cookies.txt -X POST http://localhost:8080/api/projects/1/tasks \
   -H 'Content-Type: application/json' \
   -d '{"title":"Ship release dashboard","priority":"high","assignee":"Alex"}'
 ```

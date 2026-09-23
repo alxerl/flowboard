@@ -29,3 +29,26 @@ jobs:
       - run: go test ./...
       - run: go vet ./...
       - run: go build ./...
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start from a clean checkout
+        run: docker compose up --build --wait -d
+      - name: Try the demo
+        run: |
+          curl --fail --silent --show-error http://localhost:8080/health
+          curl --fail --silent --show-error -o index.html http://localhost:8080/
+          grep -q 'Flowboard' index.html
+          curl --fail --silent --show-error -c cookies.txt -o login.json -X POST http://localhost:8080/api/auth/demo
+          grep -q 'demo@flowboard.local' login.json
+          curl --fail --silent --show-error -b cookies.txt -o projects.json http://localhost:8080/api/projects
+          grep -q '"key":"ATL"' projects.json
+          curl --fail --silent --show-error -b cookies.txt -o insights.json http://localhost:8080/api/projects/1/insights
+          grep -q '"daily"' insights.json
+      - name: Show logs on failure
+        if: failure()
+        run: docker compose logs
+      - name: Stop stack
+        if: always()
+        run: docker compose down -v
