@@ -35,6 +35,7 @@ func (a *App) Routes() *http.ServeMux {
 	mux.HandleFunc("GET /api/projects/{id}/tasks", a.withAuth(a.listTasks))
 	mux.HandleFunc("POST /api/projects/{id}/tasks", a.withAuth(a.createTask))
 	mux.HandleFunc("GET /api/projects/{id}/metrics", a.withAuth(a.metrics))
+	mux.HandleFunc("GET /api/projects/{id}/insights", a.withAuth(a.insights))
 	mux.HandleFunc("GET /api/projects/{id}/members", a.withAuth(a.listMembers))
 	mux.HandleFunc("POST /api/projects/{id}/members", a.withAuth(a.addMember))
 	mux.HandleFunc("GET /api/tasks/{id}", a.withAuth(a.getTask))
@@ -302,6 +303,23 @@ func (a *App) metrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, m)
+}
+
+func (a *App) insights(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r)
+	if err != nil || id < 1 {
+		apiError(w, 400, "invalid project id")
+		return
+	}
+	if _, ok := a.projectRole(w, r, id); !ok {
+		return
+	}
+	insights, err := a.store.Insights(r.Context(), id)
+	if err != nil {
+		dbError(w, err)
+		return
+	}
+	writeJSON(w, 200, insights)
 }
 
 func (a *App) listMembers(w http.ResponseWriter, r *http.Request) {

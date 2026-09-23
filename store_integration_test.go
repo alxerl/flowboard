@@ -124,6 +124,13 @@ func TestDeliveryFlow(t *testing.T) {
 	if err != nil || issueTask.Status != "done" {
 		t.Fatalf("closed issue: %+v, %v", issueTask, err)
 	}
+	if _, err := pool.Exec(ctx, `UPDATE tasks SET status='review',status_changed_at=now()-interval '3 days',done_at=NULL WHERE id=$1`, task.ID); err != nil {
+		t.Fatal(err)
+	}
+	insights, err := s.Insights(ctx, p.ID)
+	if err != nil || len(insights.Daily) != 14 || len(insights.Bottlenecks) != 1 || insights.Bottlenecks[0].TaskID != task.ID {
+		t.Fatalf("insights: %+v, %v", insights, err)
+	}
 	if _, err := pool.Exec(ctx, `DROP TABLE IF EXISTS webhook_deliveries,task_events,tasks,projects,legacy_tasks,project_members,sessions,users CASCADE`); err != nil {
 		t.Fatal(err)
 	}

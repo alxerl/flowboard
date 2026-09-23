@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -57,10 +58,12 @@ CREATE TABLE IF NOT EXISTS tasks (
  issue_url TEXT NOT NULL DEFAULT '',
  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+ status_changed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
  done_at TIMESTAMPTZ
 );
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS issue_number INTEGER;
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS issue_url TEXT NOT NULL DEFAULT '';
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS status_changed_at TIMESTAMPTZ NOT NULL DEFAULT now();
 CREATE UNIQUE INDEX IF NOT EXISTS tasks_issue_idx ON tasks(project_id,issue_number) WHERE issue_number IS NOT NULL;
 CREATE INDEX IF NOT EXISTS tasks_project_status_idx ON tasks(project_id, status);
 CREATE TABLE IF NOT EXISTS task_events (
@@ -233,11 +236,11 @@ func (s *Store) Task(ctx context.Context, id int64) (Task, error) {
 }
 
 func (s *Store) CreateTask(ctx context.Context, t *Task) error {
-	return s.db.QueryRow(ctx, `INSERT INTO tasks(project_id,title,description,status,priority,assignee) VALUES($1,$2,$3,$4,$5,$6) RETURNING id,created_at,updated_at`, t.ProjectID, t.Title, t.Description, t.Status, t.Priority, t.Assignee).Scan(&t.ID, &t.CreatedAt, &t.UpdatedAt)
+	return s.db.QueryRow(ctx, `INSERT INTO tasks(project_id,title,description,status,priority,assignee,done_at) VALUES($1,$2,$3,$4,$5,$6,CASE WHEN $4='done' THEN now() ELSE NULL END) RETURNING id,created_at,updated_at`, t.ProjectID, t.Title, t.Description, t.Status, t.Priority, t.Assignee).Scan(&t.ID, &t.CreatedAt, &t.UpdatedAt)
 }
 
 func (s *Store) UpdateTask(ctx context.Context, t *Task) error {
-	row := s.db.QueryRow(ctx, `UPDATE tasks SET title=$2,description=$3,status=$4,priority=$5,assignee=$6,updated_at=now(),done_at=CASE WHEN $4='done' THEN COALESCE(done_at,now()) ELSE NULL END WHERE id=$1 RETURNING updated_at`, t.ID, t.Title, t.Description, t.Status, t.Priority, t.Assignee)
+	row := s.db.QueryRow(ctx, `UPDATE tasks SET title=$2,description=$3,status=$4,priority=$5,assignee=$6,updated_at=now(),status_changed_at=CASE WHEN status<>$4 THEN now() ELSE status_changed_at END,done_at=CASE WHEN $4='done' THEN COALESCE(done_at,now()) ELSE NULL END WHERE id=$1 RETURNING updated_at`, t.ID, t.Title, t.Description, t.Status, t.Priority, t.Assignee)
 	if err := row.Scan(&t.UpdatedAt); errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotFound
 	} else if err != nil {
@@ -288,6 +291,41 @@ func (s *Store) Metrics(ctx context.Context, projectID int64) (Metrics, error) {
 	return m, err
 }
 
+func (s *Store) Insights(ctx context.Context, projectID int64) (Insights, error) {
+	result := Insights{Daily: []DailyCompletion{}, Bottlenecks: []Bottleneck{}}
+	rows, err := s.db.Query(ctx, `SELECT day::date,count(t.id)::int FROM generate_series(current_date-13,current_date,interval '1 day') AS day LEFT JOIN tasks t ON t.project_id=$1 AND t.done_at::date=day::date GROUP BY day ORDER BY day`, projectID)
+	if err != nil {
+		return result, err
+	}
+	for rows.Next() {
+		var day time.Time
+		var count int
+		if err := rows.Scan(&day, &count); err != nil {
+			rows.Close()
+			return result, err
+		}
+		result.Daily = append(result.Daily, DailyCompletion{Day: day.Format("2006-01-02"), Count: count})
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return result, err
+	}
+	rows.Close()
+	rows, err = s.db.Query(ctx, `SELECT id,title,status,round((extract(epoch FROM (now()-status_changed_at))/86400)::numeric,1)::double precision FROM tasks WHERE project_id=$1 AND ((status='review' AND status_changed_at<now()-interval '2 days') OR (status='in_progress' AND status_changed_at<now()-interval '5 days')) ORDER BY status_changed_at LIMIT 5`, projectID)
+	if err != nil {
+		return result, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var b Bottleneck
+		if err := rows.Scan(&b.TaskID, &b.Title, &b.Status, &b.Days); err != nil {
+			return result, err
+		}
+		result.Bottlenecks = append(result.Bottlenecks, b)
+	}
+	return result, rows.Err()
+}
+
 func (s *Store) ApplyPullRequest(ctx context.Context, delivery, repo string, number int, url, title, body, action string, merged bool) error {
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
@@ -325,7 +363,7 @@ func (s *Store) ApplyPullRequest(ctx context.Context, delivery, repo string, num
 		case action == "closed" && !merged:
 			status = "in_progress"
 		}
-		_, err = tx.Exec(ctx, `UPDATE tasks SET status=$2,pr_number=$3,pr_url=$4,updated_at=now(),done_at=CASE WHEN $2='done' THEN COALESCE(done_at,now()) ELSE NULL END WHERE id=$1`, id, status, number, url)
+		_, err = tx.Exec(ctx, `UPDATE tasks SET status_changed_at=CASE WHEN status<>$2 THEN now() ELSE status_changed_at END,status=$2,pr_number=$3,pr_url=$4,updated_at=now(),done_at=CASE WHEN $2='done' THEN COALESCE(done_at,now()) ELSE NULL END WHERE id=$1`, id, status, number, url)
 		if err != nil {
 			return err
 		}
@@ -386,7 +424,7 @@ func (s *Store) ApplyIssue(ctx context.Context, delivery, repo string, number in
 		if action == "reopened" {
 			status = "backlog"
 		}
-		_, err = tx.Exec(ctx, `UPDATE tasks SET title=$2,description=$3,assignee=$4,issue_url=$5,status=$6,updated_at=now(),done_at=CASE WHEN $6='done' THEN COALESCE(done_at,now()) ELSE NULL END WHERE id=$1`, id, title, body, assignee, url, status)
+		_, err = tx.Exec(ctx, `UPDATE tasks SET title=$2,description=$3,assignee=$4,issue_url=$5,status_changed_at=CASE WHEN status<>$6 THEN now() ELSE status_changed_at END,status=$6,updated_at=now(),done_at=CASE WHEN $6='done' THEN COALESCE(done_at,now()) ELSE NULL END WHERE id=$1`, id, title, body, assignee, url, status)
 		if err != nil {
 			return err
 		}
@@ -437,16 +475,17 @@ func (s *Store) SeedDemo(ctx context.Context) error {
 		{Title: "Connect GitHub pull requests", Description: "Move tasks automatically when a PR is opened or merged.", Status: "review", Priority: "high", Assignee: "Alex"},
 		{Title: "Add workspace invitations", Description: "Invite teammates into a project.", Status: "backlog", Priority: "medium", Assignee: "Maria"},
 		{Title: "Design the release board", Description: "Create a visual workflow for the team.", Status: "done", Priority: "medium", Assignee: "Maria"},
+		{Title: "Define the API contract", Description: "Agree on resources and task transitions.", Status: "done", Priority: "high", Assignee: "Alex"},
+		{Title: "Set up project database", Description: "Create the initial PostgreSQL schema.", Status: "done", Priority: "medium", Assignee: "Maria"},
 	}
-	for _, item := range items {
+	offsets := []int{6, 3, 1, 1, 3, 5}
+	for i, item := range items {
 		item.ProjectID = p.ID
 		if err := s.CreateTask(ctx, &item); err != nil {
 			return err
 		}
-		if item.Status == "done" {
-			if err := s.UpdateTask(ctx, &item); err != nil {
-				return err
-			}
+		if _, err := s.db.Exec(ctx, `UPDATE tasks SET created_at=now()-(($2+4)*interval '1 day'),status_changed_at=now()-($2*interval '1 day'),done_at=CASE WHEN status='done' THEN now()-($2*interval '1 day') ELSE NULL END WHERE id=$1`, item.ID, offsets[i]); err != nil {
+			return err
 		}
 		if err := s.AddEvent(ctx, item.ID, "created", "Task created"); err != nil {
 			return err

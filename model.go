@@ -54,3 +54,20 @@ type Metrics struct {
 	Completion float64 `json:"completion"`
 	AvgDays    float64 `json:"avg_cycle_days"`
 }
+
+type DailyCompletion struct {
+	Day   string `json:"day"`
+	Count int    `json:"count"`
+}
+
+type Bottleneck struct {
+	TaskID int64   `json:"task_id"`
+	Title  string  `json:"title"`
+	Status string  `json:"status"`
+	Days   float64 `json:"days"`
+}
+
+type Insights struct {
+	Daily       []DailyCompletion `json:"daily"`
+	Bottlenecks []Bottleneck      `json:"bottlenecks"`
+}
