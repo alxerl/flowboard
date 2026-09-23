@@ -1,49 +1,82 @@
-# Flowboard
+<p align="center">
+  <img src="assets/flowboard-banner.svg" alt="Flowboard: from issue to shipped" width="100%">
+</p>
 
-Flowboard is a Go and PostgreSQL delivery tracker for small software projects. It combines a team task board with GitHub issues and pull request events: issues become tasks, opening a linked PR moves a task into review, and merging it marks the task done. The dashboard shows delivery status, two-week throughput, average cycle time, and work stalled in review or progress.
+<p align="center">
+  <strong>A delivery workspace for small software teams.</strong><br>
+  Turn GitHub issues into tasks, follow pull requests through review, and see where work gets stuck.
+</p>
 
-## How it works
+<p align="center">
+  <a href="https://github.com/alxerl/flowboard/actions/workflows/ci.yml"><img src="https://github.com/alxerl/flowboard/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
+  &nbsp; Go · PostgreSQL · Docker Compose · GitHub webhooks
+</p>
 
-```mermaid
-flowchart LR
-  GH[GitHub issues and PRs] -->|signed webhook| WH[Go webhook handler]
-  WH -->|verify signature and delivery ID| DB[(PostgreSQL)]
-  DB --> API[Go API]
-  API --> UI[Team dashboard]
-```
+## Preview
 
-- **Repository sync:** signed issue events create or update tasks. Pull requests containing a task reference such as `ATL-2` move that task to review or done.
-- **Idempotent events:** GitHub delivery IDs are stored in PostgreSQL, so retries do not create duplicate tasks or activity entries.
-- **Team access:** accounts use password hashes and server-side sessions. Project owners add registered teammates; other projects stay private.
-- **Delivery insights:** the dashboard plots completed tasks by day and highlights work that has spent over two days in review or five days in progress.
+This screenshot is from the running demo workspace. The repository includes sample data, so the board and analytics are ready as soon as the stack starts.
 
-The repository includes a one-command local demo and a CI smoke test that starts the full Docker Compose stack from a clean checkout.
+![Flowboard dashboard showing delivery metrics, bottlenecks and a Kanban board](assets/dashboard.png)
 
-## Run locally
+## Run in one command
+
+With Docker and Docker Compose installed:
 
 ```sh
 docker compose up --build
 ```
 
-Open <http://localhost:8080> and choose **Explore demo workspace**. The demo workspace is created on the first start. The local Compose stack uses development database credentials. To start without demo access, set `DEMO_MODE=0` before running Compose.
+Open **[localhost:8080](http://localhost:8080)** and click **Explore demo workspace**. No GitHub account, webhook, or API key is needed for the local demo.
 
-To stop the stack, press Ctrl+C. Run `docker compose down` to stop containers started in the background. Run `docker compose down -v` only when you also want to delete the local demo database.
+The first start creates the database and sample workspace. Press `Ctrl+C` to stop. To delete the local demo data as well, run `docker compose down -v`.
 
-To run Go directly, start PostgreSQL and set `DATABASE_URL` as shown in `.env.example`, then run `go run .`.
+## What Flowboard does
 
-## GitHub integration
+| Area | What is implemented |
+|---|---|
+| Team workspace | Registration, sessions, project owners and members, private project data |
+| Delivery board | Four workflow stages, priorities, assignees, drag-and-drop cards, activity history |
+| GitHub sync | Signed issue and pull request webhooks with idempotent delivery processing |
+| Automation | Issues become tasks; opening a linked PR moves a task to review; merging it moves the task to done |
+| Insights | 14-day throughput, completion rate, average cycle time, and tasks stalled in review or progress |
 
-1. Create a project with its repository in `owner/name` form.
-2. Set `GITHUB_WEBHOOK_SECRET` to a random secret. For Compose, put it in a local `.env` file.
-3. In the GitHub repository, add a webhook pointing to `https://your-host/webhooks/github`, select `application/json`, choose **Issues** and **Pull requests** events, and use the same secret.
-4. Include the project key and task ID in a PR title or description, for example `ATL-2 Add dashboard metrics`.
+### From GitHub to the board
 
-Only signed `issues` and `pull_request` events are processed. Duplicate GitHub delivery IDs are ignored. The webhook works only for projects whose repository matches the event repository. Opening an issue creates a task; editing, closing, or reopening it updates the linked task.
+1. An issue in a connected repository creates a task. Editing, closing, or reopening the issue updates that task.
+2. A PR title or description can refer to a task with its project key and ID, such as `ATL-2`.
+3. Opening the PR moves the task to **In review**; merging it moves the task to **Done**. Both actions appear in the activity history.
 
-## API
+GitHub events are verified with the webhook secret and deduplicated by delivery ID in PostgreSQL.
+
+## Architecture
+
+```mermaid
+flowchart LR
+  GH[GitHub issues and PRs] -->|signed events| WH[Go webhook handler]
+  WH -->|verify and deduplicate| PG[(PostgreSQL)]
+  PG --> API[Go HTTP API]
+  API --> UI[Board and insights]
+```
+
+The Go service embeds the web interface, exposes the JSON API, and applies database schema changes at startup. Docker Compose starts it alongside PostgreSQL. CI runs unit and integration tests, then starts the full stack from a clean checkout and checks demo login, projects, and insights.
+
+<details>
+<summary><strong>Connect a GitHub repository</strong></summary>
+
+The local demo works without this step. To sync your own repository:
+
+1. Create a project and enter its repository as `owner/name`.
+2. Set `GITHUB_WEBHOOK_SECRET` in a local `.env` file. See `.env.example`.
+3. Add a GitHub webhook with the same secret, JSON content type, and **Issues** and **Pull requests** events. Point it to `https://your-host/webhooks/github`.
+4. Include a task reference such as `ATL-2` in a PR title or description.
+
+</details>
+
+<details>
+<summary><strong>API routes</strong></summary>
 
 | Method | Path | Purpose |
-|---|---|---|
+|---|---|
 | POST | `/api/auth/register`, `/api/auth/login`, `/api/auth/logout` | Accounts and sessions |
 | GET / POST | `/api/projects` | List or create projects |
 | GET / POST | `/api/projects/{id}/members` | List members or add an existing user (owner only) |
@@ -51,23 +84,9 @@ Only signed `issues` and `pull_request` events are processed. Duplicate GitHub d
 | GET / PATCH / DELETE | `/api/tasks/{id}` | Read, update or delete a task |
 | GET | `/api/tasks/{id}/events` | Task activity history |
 | GET | `/api/projects/{id}/metrics` | Delivery metrics |
-| GET | `/api/projects/{id}/insights` | Two-week throughput and stalled tasks |
-| POST | `/webhooks/github` | Receive signed GitHub issue and PR events |
+| GET | `/api/projects/{id}/insights` | Throughput and stalled tasks |
+| POST | `/webhooks/github` | Signed GitHub events |
 
-Example using the local demo account:
+The API uses an HTTP-only session cookie. `DEMO_MODE=1` enables a shared demo account; use `DEMO_MODE=0` and your own database credentials for private workspaces.
 
-```sh
-curl -c cookies.txt -X POST http://localhost:8080/api/auth/demo
-curl -b cookies.txt -X POST http://localhost:8080/api/projects/1/tasks \
-  -H 'Content-Type: application/json' \
-  -d '{"title":"Ship release dashboard","priority":"high","assignee":"Alex"}'
-```
-
-The API uses an HTTP-only session cookie. A new project is owned by its creator. Owners can add registered users as members or owners; only project members can access its tasks, events, and metrics. `DEMO_MODE=1` enables a shared demo account, so use `DEMO_MODE=0` for private workspaces.
-
-## Next milestones
-
-- Email invitations and self-service acceptance for project membership.
-- Configurable webhook-driven automation rules.
-- Advanced filters and customizable bottleneck thresholds.
-- Hosted demo and a short walkthrough video.
+</details>
