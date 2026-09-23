@@ -1,0 +1,63 @@
+name: CI
+on:
+  push:
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: flowboard
+          POSTGRES_PASSWORD: flowboard
+          POSTGRES_DB: flowboard_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U flowboard"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://flowboard:flowboard@localhost:5432/flowboard_test?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go test ./...
+      - run: go vet ./...
+      - run: go build ./...
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start from a clean checkout
+        run: docker compose up --build --wait -d
+      - name: Try the demo
+        run: |
+          curl --fail --silent --show-error http://localhost:8080/health
+          curl --fail --silent --show-error -o index.html http://localhost:8080/
+          grep -q 'Flowboard' index.html
+          curl --fail --silent --show-error -c cookies.txt -o login.json -X POST http://localhost:8080/api/auth/demo
+          grep -q 'demo@flowboard.local' login.json
+          curl --fail --silent --show-error -b cookies.txt -o projects.json http://localhost:8080/api/projects
+          grep -q '"key":"ATL"' projects.json
+          curl --fail --silent --show-error -b cookies.txt -o insights.json http://localhost:8080/api/projects/1/insights
+          grep -q '"daily"' insights.json
+      - name: Capture the running board
+        run: |
+          npm install --no-save playwright@1.63.0
+          npx playwright install chromium --with-deps
+          node .github/scripts/capture-demo.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flowboard-screenshot
+          path: demo-screenshot.png
+      - name: Show logs on failure
+        if: failure()
+        run: docker compose logs
+      - name: Stop stack
+        if: always()
+        run: docker compose down -v
