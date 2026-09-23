@@ -98,6 +98,32 @@ func TestDeliveryFlow(t *testing.T) {
 	if err != nil || len(events) != 2 {
 		t.Fatalf("events: %v, %v", events, err)
 	}
+	if err := s.ApplyIssue(ctx, "issue-1", p.Repo, 13, "https://github.com/example/flowboard/issues/13", "Investigate latency", "Profile the API", "alex", "opened"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ApplyIssue(ctx, "issue-1", p.Repo, 13, "https://github.com/example/flowboard/issues/13", "Investigate latency", "Profile the API", "alex", "opened"); err != nil {
+		t.Fatal(err)
+	}
+	issueTasks, err := s.Tasks(ctx, p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var issueTask Task
+	for _, item := range issueTasks {
+		if item.IssueNumber != nil && *item.IssueNumber == 13 {
+			issueTask = item
+		}
+	}
+	if issueTask.ID == 0 || issueTask.Status != "backlog" {
+		t.Fatalf("issue sync: %+v", issueTask)
+	}
+	if err := s.ApplyIssue(ctx, "issue-2", p.Repo, 13, issueTask.IssueURL, "Investigate latency", "Profile the API", "alex", "closed"); err != nil {
+		t.Fatal(err)
+	}
+	issueTask, err = s.Task(ctx, issueTask.ID)
+	if err != nil || issueTask.Status != "done" {
+		t.Fatalf("closed issue: %+v, %v", issueTask, err)
+	}
 	if _, err := pool.Exec(ctx, `DROP TABLE IF EXISTS webhook_deliveries,task_events,tasks,projects,legacy_tasks,project_members,sessions,users CASCADE`); err != nil {
 		t.Fatal(err)
 	}

@@ -53,6 +53,22 @@ type pullRequestEvent struct {
 	} `json:"pull_request"`
 }
 
+type issueEvent struct {
+	Action     string `json:"action"`
+	Repository struct {
+		FullName string `json:"full_name"`
+	} `json:"repository"`
+	Issue struct {
+		Number   int    `json:"number"`
+		Title    string `json:"title"`
+		Body     string `json:"body"`
+		HTMLURL  string `json:"html_url"`
+		Assignee *struct {
+			Login string `json:"login"`
+		} `json:"assignee"`
+	} `json:"issue"`
+}
+
 func (a *App) githubWebhook(w http.ResponseWriter, r *http.Request) {
 	if a.webhookSecret == "" {
 		apiError(w, http.StatusServiceUnavailable, "webhook not configured")
@@ -67,26 +83,50 @@ func (a *App) githubWebhook(w http.ResponseWriter, r *http.Request) {
 		apiError(w, 401, "invalid signature")
 		return
 	}
-	if r.Header.Get("X-GitHub-Event") != "pull_request" {
-		writeJSON(w, 200, map[string]string{"status": "ignored"})
-		return
-	}
 	delivery := r.Header.Get("X-GitHub-Delivery")
 	if delivery == "" {
 		apiError(w, 400, "missing delivery id")
 		return
 	}
-	var event pullRequestEvent
-	if err := json.Unmarshal(body, &event); err != nil {
-		apiError(w, 400, "invalid JSON")
-		return
-	}
-	if event.Repository.FullName == "" || event.Number < 1 || event.PullRequest.HTMLURL == "" {
-		apiError(w, 400, "invalid pull request event")
-		return
-	}
-	if err := a.store.ApplyPullRequest(r.Context(), delivery, event.Repository.FullName, event.Number, event.PullRequest.HTMLURL, event.PullRequest.Title, event.PullRequest.Body, event.Action, event.PullRequest.Merged); err != nil {
-		dbError(w, err)
+	switch r.Header.Get("X-GitHub-Event") {
+	case "pull_request":
+		var event pullRequestEvent
+		if err := json.Unmarshal(body, &event); err != nil {
+			apiError(w, 400, "invalid JSON")
+			return
+		}
+		if event.Repository.FullName == "" || event.Number < 1 || event.PullRequest.HTMLURL == "" {
+			apiError(w, 400, "invalid pull request event")
+			return
+		}
+		if err := a.store.ApplyPullRequest(r.Context(), delivery, event.Repository.FullName, event.Number, event.PullRequest.HTMLURL, event.PullRequest.Title, event.PullRequest.Body, event.Action, event.PullRequest.Merged); err != nil {
+			dbError(w, err)
+			return
+		}
+	case "issues":
+		var event issueEvent
+		if err := json.Unmarshal(body, &event); err != nil {
+			apiError(w, 400, "invalid JSON")
+			return
+		}
+		if event.Repository.FullName == "" || event.Issue.Number < 1 || event.Issue.HTMLURL == "" {
+			apiError(w, 400, "invalid issue event")
+			return
+		}
+		if event.Action != "opened" && event.Action != "edited" && event.Action != "reopened" && event.Action != "closed" {
+			writeJSON(w, 200, map[string]string{"status": "ignored"})
+			return
+		}
+		assignee := ""
+		if event.Issue.Assignee != nil {
+			assignee = event.Issue.Assignee.Login
+		}
+		if err := a.store.ApplyIssue(r.Context(), delivery, event.Repository.FullName, event.Issue.Number, event.Issue.HTMLURL, event.Issue.Title, event.Issue.Body, assignee, event.Action); err != nil {
+			dbError(w, err)
+			return
+		}
+	default:
+		writeJSON(w, 200, map[string]string{"status": "ignored"})
 		return
 	}
 	writeJSON(w, 200, map[string]string{"status": "processed"})

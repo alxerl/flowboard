@@ -53,10 +53,15 @@ CREATE TABLE IF NOT EXISTS tasks (
  assignee TEXT NOT NULL DEFAULT '',
  pr_number INTEGER,
  pr_url TEXT NOT NULL DEFAULT '',
+ issue_number INTEGER,
+ issue_url TEXT NOT NULL DEFAULT '',
  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
  done_at TIMESTAMPTZ
 );
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS issue_number INTEGER;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS issue_url TEXT NOT NULL DEFAULT '';
+CREATE UNIQUE INDEX IF NOT EXISTS tasks_issue_idx ON tasks(project_id,issue_number) WHERE issue_number IS NOT NULL;
 CREATE INDEX IF NOT EXISTS tasks_project_status_idx ON tasks(project_id, status);
 CREATE TABLE IF NOT EXISTS task_events (
  id BIGSERIAL PRIMARY KEY,
@@ -194,11 +199,11 @@ func (s *Store) CreateProject(ctx context.Context, p *Project) error {
 	return s.db.QueryRow(ctx, `INSERT INTO projects(name,key,repo) VALUES($1,$2,$3) RETURNING id,created_at`, p.Name, p.Key, p.Repo).Scan(&p.ID, &p.CreatedAt)
 }
 
-const taskColumns = `id,project_id,title,description,status,priority,assignee,pr_number,pr_url,created_at,updated_at`
+const taskColumns = `id,project_id,title,description,status,priority,assignee,pr_number,pr_url,issue_number,issue_url,created_at,updated_at`
 
 func scanTask(row pgx.Row) (Task, error) {
 	var t Task
-	err := row.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Description, &t.Status, &t.Priority, &t.Assignee, &t.PRNumber, &t.PRURL, &t.CreatedAt, &t.UpdatedAt)
+	err := row.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Description, &t.Status, &t.Priority, &t.Assignee, &t.PRNumber, &t.PRURL, &t.IssueNumber, &t.IssueURL, &t.CreatedAt, &t.UpdatedAt)
 	return t, err
 }
 
@@ -333,6 +338,72 @@ func (s *Store) ApplyPullRequest(ctx context.Context, delivery, repo string, num
 		}
 	}
 	return tx.Commit(ctx)
+}
+
+func (s *Store) ApplyIssue(ctx context.Context, delivery, repo string, number int, url, title, body, assignee, action string) error {
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	cmd, err := tx.Exec(ctx, `INSERT INTO webhook_deliveries(delivery_id) VALUES($1) ON CONFLICT DO NOTHING`, delivery)
+	if err != nil {
+		return err
+	}
+	if cmd.RowsAffected() == 0 {
+		return nil
+	}
+	var projectID int64
+	if err := tx.QueryRow(ctx, `SELECT id FROM projects WHERE lower(repo)=lower($1)`, repo).Scan(&projectID); errors.Is(err, pgx.ErrNoRows) {
+		return tx.Commit(ctx)
+	} else if err != nil {
+		return err
+	}
+	title = limitText(strings.TrimSpace(title), 200)
+	if title == "" {
+		title = "Untitled GitHub issue"
+	}
+	body = limitText(body, 4000)
+	var id int64
+	var oldStatus string
+	err = tx.QueryRow(ctx, `SELECT id,status FROM tasks WHERE project_id=$1 AND issue_number=$2`, projectID, number).Scan(&id, &oldStatus)
+	if errors.Is(err, pgx.ErrNoRows) {
+		status := "backlog"
+		if action == "closed" {
+			status = "done"
+		}
+		err = tx.QueryRow(ctx, `INSERT INTO tasks(project_id,title,description,status,assignee,issue_number,issue_url,done_at) VALUES($1,$2,$3,$4,$5,$6,$7,CASE WHEN $4='done' THEN now() ELSE NULL END) RETURNING id`, projectID, title, body, status, assignee, number, url).Scan(&id)
+		if err != nil {
+			return err
+		}
+	} else if err != nil {
+		return err
+	} else {
+		status := oldStatus
+		if action == "closed" {
+			status = "done"
+		}
+		if action == "reopened" {
+			status = "backlog"
+		}
+		_, err = tx.Exec(ctx, `UPDATE tasks SET title=$2,description=$3,assignee=$4,issue_url=$5,status=$6,updated_at=now(),done_at=CASE WHEN $6='done' THEN COALESCE(done_at,now()) ELSE NULL END WHERE id=$1`, id, title, body, assignee, url, status)
+		if err != nil {
+			return err
+		}
+	}
+	message := fmt.Sprintf("GitHub issue #%d %s", number, action)
+	if _, err = tx.Exec(ctx, `INSERT INTO task_events(task_id,kind,message) VALUES($1,'github',$2)`, id, message); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func limitText(s string, n int) string {
+	r := []rune(s)
+	if len(r) > n {
+		return string(r[:n])
+	}
+	return s
 }
 
 func (s *Store) SeedDemo(ctx context.Context) error {

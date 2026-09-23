@@ -1,6 +1,6 @@
 # Flowboard
 
-Flowboard is a Go and PostgreSQL delivery tracker for small software projects. It combines a task board with GitHub pull request events: opening a PR moves a linked task into review, and merging it marks the task done. The dashboard shows delivery status and average cycle time.
+Flowboard is a Go and PostgreSQL delivery tracker for small software projects. It combines a team task board with GitHub issues and pull request events: issues become tasks, opening a linked PR moves a task into review, and merging it marks the task done. The dashboard shows delivery status and average cycle time.
 
 ## Run locally
 
@@ -16,10 +16,10 @@ To run Go directly, start PostgreSQL and set `DATABASE_URL` as shown in `.env.ex
 
 1. Create a project with its repository in `owner/name` form.
 2. Set `GITHUB_WEBHOOK_SECRET` to a random secret. For Compose, put it in a local `.env` file.
-3. In the GitHub repository, add a webhook pointing to `https://your-host/webhooks/github`, select `application/json`, choose **Pull requests** events, and use the same secret.
+3. In the GitHub repository, add a webhook pointing to `https://your-host/webhooks/github`, select `application/json`, choose **Issues** and **Pull requests** events, and use the same secret.
 4. Include the project key and task ID in a PR title or description, for example `ATL-2 Add dashboard metrics`.
 
-Only signed `pull_request` events are accepted. Duplicate GitHub delivery IDs are ignored. The webhook works only for projects whose repository matches the event repository.
+Only signed `issues` and `pull_request` events are processed. Duplicate GitHub delivery IDs are ignored. The webhook works only for projects whose repository matches the event repository. Opening an issue creates a task; editing, closing, or reopening it updates the linked task.
 
 ## API
 
@@ -32,7 +32,7 @@ Only signed `pull_request` events are accepted. Duplicate GitHub delivery IDs ar
 | GET / PATCH / DELETE | `/api/tasks/{id}` | Read, update or delete a task |
 | GET | `/api/tasks/{id}/events` | Task activity history |
 | GET | `/api/projects/{id}/metrics` | Delivery metrics |
-| POST | `/webhooks/github` | Receive signed GitHub PR events |
+| POST | `/webhooks/github` | Receive signed GitHub issue and PR events |
 
 Example:
 
@@ -47,6 +47,6 @@ The API uses an HTTP-only session cookie. A new project is owned by its creator.
 ## Next milestones
 
 - Email invitations and self-service acceptance for project membership.
-- GitHub issue linking and webhook-driven automation rules.
+- Configurable webhook-driven automation rules.
 - Activity charts, filters and bottleneck reports.
 - Hosted demo and a short walkthrough video.

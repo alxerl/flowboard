@@ -165,6 +165,10 @@ func (a *App) createTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	t.ProjectID = id
+	t.PRNumber = nil
+	t.PRURL = ""
+	t.IssueNumber = nil
+	t.IssueURL = ""
 	t.Title = strings.TrimSpace(t.Title)
 	if t.Status == "" {
 		t.Status = "backlog"

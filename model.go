@@ -31,6 +31,8 @@ type Task struct {
 	Assignee    string    `json:"assignee"`
 	PRNumber    *int      `json:"pr_number,omitempty"`
 	PRURL       string    `json:"pr_url,omitempty"`
+	IssueNumber *int      `json:"issue_number,omitempty"`
+	IssueURL    string    `json:"issue_url,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }
