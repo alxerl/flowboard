@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Flowboard — delivery workspace</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/auth.css">
+  <link rel="stylesheet" href="/insights.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <section class="auth-screen" id="authScreen" hidden><div class="auth-card"><div class="brand auth-brand"><span class="brand-mark">F</span><div>Flowboard<small>DELIVERY WORKSPACE</small></div></div><div class="eyebrow">WELCOME TO YOUR WORKSPACE</div><h1>Ship work together.</h1><p>Connect tasks, pull requests and delivery metrics in one place.</p><form id="authForm"><label id="nameField" hidden>Your name<input name="display_name" placeholder="Alex"></label><label>Email<input name="email" type="email" required placeholder="you@example.com"></label><label>Password<input name="password" type="password" required placeholder="At least 10 characters"></label><p class="form-error"></p><button class="button primary" id="authSubmit" type="submit">Sign in</button></form><button class="text-button" id="switchAuth">Create an account</button><div class="auth-divider" id="demoDivider">or</div><button class="button outline" id="demoLogin">Explore demo workspace</button></div></section>
+  <div class="shell" id="appShell" hidden>
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-mark">F</span><div>Flowboard<small>DELIVERY WORKSPACE</small></div></div>
+      <div class="nav-label">WORKSPACE</div>
+      <button class="nav-item active" id="boardNav"><span>▦</span> Project board</button>
+      <div class="sidebar-bottom"><span class="status-dot"></span> Go service connected</div>
+    </aside>
+    <main>
+      <header class="topbar"><div class="breadcrumbs">Workspace <span>/</span> <strong id="crumbProject">Projects</strong></div><div class="top-actions"><span id="userName"></span><button class="text-button" id="logout">Sign out</button></div></header>
+      <section class="content">
+        <div class="headline"><div><div class="eyebrow">PROJECT OVERVIEW</div><h1 id="projectTitle">Your projects</h1><p id="projectSubtitle">Track delivery from first task to merged pull request.</p></div><button class="button outline" id="newProject">+ New project</button></div>
+        <div class="project-row"><label for="projectSelect">PROJECT</label><select id="projectSelect"></select><span id="repoLabel"></span></div>
+        <section class="metrics" id="metrics"></section>
+        <section class="insights" id="insights"><div class="insight-panel"><div class="insight-head"><div><h2>Delivery pulse</h2><p>Completed tasks over the last 14 days</p></div><span class="insight-kicker">THROUGHPUT</span></div><div class="chart" id="throughputChart"></div></div><div class="insight-panel"><div class="insight-head"><div><h2>Needs attention</h2><p>Work waiting too long in one stage</p></div><span class="insight-kicker">BOTTLENECKS</span></div><div id="bottlenecks"></div></div></section>
+        <div class="board-heading"><div><h2>Delivery board</h2><p>Move tasks across stages. GitHub pull requests can update them automatically.</p></div><div class="board-actions"><button class="button outline" id="inviteMember">+ Add member</button><button class="button primary" id="newTask">+ New task</button></div></div>
+        <section class="board" id="board"></section>
+        <div class="empty" id="empty" hidden>No projects yet. Create one to start tracking delivery.</div>
+      </section>
+    </main>
+  </div>
+  <dialog id="projectDialog"><form id="projectForm"><div class="dialog-title"><h2>New project</h2><button type="button" class="close" data-close>×</button></div><label>Name<input name="name" required minlength="2" maxlength="100" placeholder="Atlas release"></label><label>Key<input name="key" required minlength="2" maxlength="12" placeholder="ATL"></label><label>GitHub repository <small>(optional, owner/name)</small><input name="repo" placeholder="owner/repo"></label><p class="form-error"></p><button class="button primary" type="submit">Create project</button></form></dialog>
+  <dialog id="taskDialog"><form id="taskForm"><div class="dialog-title"><h2>New task</h2><button type="button" class="close" data-close>×</button></div><label>Title<input name="title" required minlength="2" maxlength="200" placeholder="Ship the API"></label><label>Description<textarea name="description" rows="3" placeholder="What needs to happen?"></textarea></label><div class="form-grid"><label>Priority<select name="priority"><option value="medium">Medium</option><option value="high">High</option><option value="low">Low</option></select></label><label>Assignee<input name="assignee" placeholder="Name"></label></div><p class="form-error"></p><button class="button primary" type="submit">Create task</button></form></dialog>
+  <dialog id="inviteDialog"><form id="inviteForm"><div class="dialog-title"><h2>Add project member</h2><button type="button" class="close" data-close>×</button></div><p>The person needs a Flowboard account first.</p><label>Email<input name="email" type="email" required placeholder="teammate@example.com"></label><label>Role<select name="role"><option value="member">Member</option><option value="owner">Owner</option></select></label><p class="form-error"></p><button class="button primary" type="submit">Add member</button></form></dialog>
+  <dialog id="detailDialog"><div class="dialog-title"><h2 id="detailTitle"></h2><button type="button" class="close" data-close>×</button></div><p id="detailDescription"></p><div id="detailMeta"></div><h3>Activity</h3><div id="detailEvents"></div></dialog>
+  <div id="toast" role="status"></div>
+</body>
+</html>

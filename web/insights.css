@@ -1,0 +1,20 @@
+.insights{display:grid;grid-template-columns:1.25fr 1fr;gap:15px;margin:-15px 0 39px}
+.insight-panel{background:#fff;border:1px solid #e7eaf0;border-radius:13px;padding:21px 23px;min-height:235px;box-shadow:0 4px 16px #1c2a4b05}
+.insight-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+.insight-head h2{font-size:16px}
+.insight-head p{font-size:11px}
+.insight-kicker{font-size:9px;letter-spacing:1px;font-weight:800;color:#7970e5;background:#f2f0ff;padding:6px;border-radius:5px}
+.chart{height:135px;display:flex;align-items:end;gap:5px;border-bottom:1px solid #e8ebf1;margin-top:21px}
+.chart-day{height:100%;flex:1;display:flex;align-items:end;position:relative}
+.chart-bar{width:100%;min-height:3px;border-radius:4px 4px 0 0;background:#746bf5}
+.chart-day:hover .chart-bar{background:#4d44dd}
+.chart-day::after{content:attr(data-day);position:absolute;bottom:-21px;left:50%;transform:translateX(-50%);font-size:9px;color:#a1aabc}
+.chart-day:not(:first-child):not(:last-child):not(:nth-child(4)):not(:nth-child(7)):not(:nth-child(10)){font-size:0}
+.chart-day:not(:first-child):not(:last-child):not(:nth-child(4)):not(:nth-child(7)):not(:nth-child(10))::after{content:''}
+.bottleneck{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 0;border-bottom:1px solid #edf0f4}
+.bottleneck:last-child{border-bottom:0}
+.bottleneck-title{font-size:12px;font-weight:750;color:#3a4963}
+.bottleneck-sub{font-size:10px;color:#9aa5b5;margin-top:3px}
+.bottleneck-days{color:#d77552;background:#fff2ec;padding:5px 7px;border-radius:5px;font-size:11px;font-weight:800;white-space:nowrap}
+.all-clear{display:grid;place-items:center;height:130px;color:#91a0af;font-size:12px;text-align:center}
+@media(max-width:900px){.insights{grid-template-columns:1fr}}
